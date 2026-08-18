@@ -1,6 +1,6 @@
 ﻿CurrentStreak=0
 LongestStreak=5
 TodayStatus=Remaining
-DataDate=2026-08-17
-LastUpdated=17-08-2026 01:14:03
-FetchStatus=OK
+DataDate=2026-08-18
+LastUpdated=18-08-2026 21:22:03
+FetchStatus=ERROR
