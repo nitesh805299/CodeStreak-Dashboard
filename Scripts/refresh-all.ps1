@@ -1,5 +1,32 @@
 $ErrorActionPreference = "Continue"
 
+# The scheduled task previously opened an interactive PowerShell window on the
+# desktop. Hide that host immediately while keeping all output in the log file.
+# Set DEVELOPER_STREAK_SHOW_CONSOLE=1 only when debugging the script manually.
+if ($env:DEVELOPER_STREAK_SHOW_CONSOLE -ne "1") {
+    if (-not ("DeveloperStreak.ConsoleWindow" -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace DeveloperStreak {
+    public static class ConsoleWindow {
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr GetConsoleWindow();
+
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    }
+}
+'@
+    }
+
+    $consoleWindow = [DeveloperStreak.ConsoleWindow]::GetConsoleWindow()
+    if ($consoleWindow -ne [IntPtr]::Zero) {
+        [DeveloperStreak.ConsoleWindow]::ShowWindow($consoleWindow, 0) | Out-Null
+    }
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 
 $logDir = Join-Path $root "logs"

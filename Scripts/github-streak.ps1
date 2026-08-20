@@ -110,10 +110,57 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                 $_.Date.Date -eq $today
             }
 
-        if (
+        $graphActivityToday = (
             $todayContribution -and
             $todayContribution.Level -gt 0
-        ) {
+        )
+
+        # A newly pushed commit or a newly created repository can take time to
+        # appear in GitHub's contribution graph. Public GitHub events appear
+        # sooner, so count either of those actions as today's completed task.
+        $eventActivityToday = $false
+        $eventActivitySource = ""
+
+        try {
+            $eventsUrl = "https://api.github.com/users/$username/events/public?per_page=100"
+            $events = Invoke-RestMethod `
+                -Uri $eventsUrl `
+                -TimeoutSec 30 `
+                -Headers @{
+                    "User-Agent" = "DeveloperStreakTracker"
+                    "Accept" = "application/vnd.github+json"
+                }
+
+            foreach ($event in $events) {
+                $eventTime = [DateTimeOffset]::Parse($event.created_at).LocalDateTime
+
+                if ($eventTime.Date -ne $today) {
+                    continue
+                }
+
+                if ($event.type -eq "PushEvent") {
+                    $eventActivityToday = $true
+                    $eventActivitySource = "Commit push"
+                    break
+                }
+
+                if (
+                    $event.type -eq "CreateEvent" -and
+                    $event.payload.ref_type -eq "repository"
+                ) {
+                    $eventActivityToday = $true
+                    $eventActivitySource = "New repository"
+                    break
+                }
+            }
+        }
+        catch {
+            # The contribution graph remains a valid fallback if the public
+            # events endpoint is temporarily unavailable or rate-limited.
+            Write-Host "GitHub event check skipped: $($_.Exception.Message)"
+        }
+
+        if ($graphActivityToday -or $eventActivityToday) {
             $todayStatus = "Completed"
         }
         else {
@@ -206,6 +253,7 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
 CurrentStreak=$currentStreak
 LongestStreak=$longestStreak
 TodayStatus=$todayStatus
+TodayActivitySource=$(if ($eventActivityToday) { $eventActivitySource } elseif ($graphActivityToday) { "Contribution graph" } else { "None" })
 DataDate=$todayString
 LastUpdated=$(Get-Date -Format "dd-MM-yyyy HH:mm:ss")
 FetchStatus=OK
