@@ -53,6 +53,9 @@ query userProfileCalendar(`$username: String!, `$year: Int) {
         userCalendar(year: `$year) {
             submissionCalendar
         }
+        recentAcSubmissionList(limit: 1) {
+            timestamp
+        }
     }
 }
 "@
@@ -140,6 +143,34 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
             Sort-Object -Unique
 
 
+        # The calendar can lag behind the Recent AC list by a few minutes.
+        # Count a just-accepted problem immediately instead of leaving today's
+        # task as Remaining until LeetCode refreshes its calendar cache.
+        $recentAcceptedToday = $false
+
+        $recentAccepted =
+            $response.data.matchedUser.recentAcSubmissionList |
+            Select-Object -First 1
+
+        if ($recentAccepted -and $recentAccepted.timestamp) {
+            $recentAcceptedDate =
+                [DateTimeOffset]::FromUnixTimeSeconds(
+                    [long]$recentAccepted.timestamp
+                ).LocalDateTime.Date
+
+            $recentAcceptedToday =
+                $recentAcceptedDate -eq $today
+        }
+
+        if (
+            $recentAcceptedToday -and
+            -not ($activeDates -contains $today)
+        ) {
+            $activeDates += $today
+            $activeDates = $activeDates | Sort-Object -Unique
+        }
+
+
         # ====================================================
         # TODAY STATUS
         # ====================================================
@@ -213,6 +244,7 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
 CurrentStreak=$currentStreak
 LongestStreak=$longestStreak
 TodayStatus=$todayStatus
+TodayActivitySource=$(if ($recentAcceptedToday) { "Recent accepted submission" } elseif ($activeDates -contains $today) { "Submission calendar" } else { "None" })
 DataDate=$todayString
 LastUpdated=$(Get-Date -Format "dd-MM-yyyy HH:mm:ss")
 FetchStatus=OK

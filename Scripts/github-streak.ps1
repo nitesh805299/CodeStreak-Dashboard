@@ -167,6 +167,19 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
             $todayStatus = "Remaining"
         }
 
+        # GitHub's contribution graph and public-events feed can update at
+        # different times. A verified completion must not change back to
+        # Remaining later on the same calendar day.
+        if (
+            $todayStatus -ne "Completed" -and
+            $oldDate -eq $todayString -and
+            $oldStatus -eq "Completed"
+        ) {
+            $todayStatus = "Completed"
+            $eventActivityToday = $true
+            $eventActivitySource = "Previously confirmed today"
+        }
+
 
         # ====================================================
         # CURRENT STREAK

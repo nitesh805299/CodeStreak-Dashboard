@@ -201,9 +201,8 @@ with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE_DIR),
             channel="chrome",
-            headless=False,
-            viewport=None,
-            args=["--start-maximized"]
+            headless=True,
+            viewport={"width": 1280, "height": 900}
         )
 
         page = context.pages[0]

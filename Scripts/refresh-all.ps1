@@ -1,31 +1,43 @@
+param(
+    [switch]$BackgroundWorker
+)
+
 $ErrorActionPreference = "Continue"
 
-# The scheduled task previously opened an interactive PowerShell window on the
-# desktop. Hide that host immediately while keeping all output in the log file.
-# Set DEVELOPER_STREAK_SHOW_CONSOLE=1 only when debugging the script manually.
-if ($env:DEVELOPER_STREAK_SHOW_CONSOLE -ne "1") {
-    if (-not ("DeveloperStreak.ConsoleWindow" -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
+# Existing scheduled tasks may still invoke this .ps1 directly. Immediately
+# hand those calls to WScript, which launches PowerShell with no console window.
+# The worker then continues with -BackgroundWorker in the background.
+if (
+    -not $BackgroundWorker -and
+    $env:DEVELOPER_STREAK_SHOW_CONSOLE -ne "1"
+) {
+    $hiddenLauncher = Join-Path $PSScriptRoot "refresh-all-hidden.vbs"
 
-namespace DeveloperStreak {
-    public static class ConsoleWindow {
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr GetConsoleWindow();
+    if (Test-Path $hiddenLauncher) {
+        Start-Process `
+            -FilePath "$env:WINDIR\System32\wscript.exe" `
+            -ArgumentList "`"$hiddenLauncher`"" `
+            -WindowStyle Hidden
 
-        [DllImport("user32.dll")]
-        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        exit 0
     }
 }
-'@
-    }
 
-    $consoleWindow = [DeveloperStreak.ConsoleWindow]::GetConsoleWindow()
-    if ($consoleWindow -ne [IntPtr]::Zero) {
-        [DeveloperStreak.ConsoleWindow]::ShowWindow($consoleWindow, 0) | Out-Null
-    }
+$createdNew = $false
+$refreshMutex = [System.Threading.Mutex]::new(
+    $true,
+    "Local\DeveloperStreakTracker.RefreshAll",
+    [ref]$createdNew
+)
+
+# Do not allow a manual refresh and the scheduled refresh to write the same
+# data files at the same time.
+if (-not $createdNew) {
+    $refreshMutex.Dispose()
+    exit 0
 }
+
+try {
 
 $root = Split-Path -Parent $PSScriptRoot
 
@@ -58,6 +70,48 @@ function Log {
     Add-Content `
         -Path $logFile `
         -Value $line
+}
+
+
+function Test-TaskCompletedToday {
+
+    param(
+        [string]$FilePath,
+        [string]$Today
+    )
+
+    if (-not (Test-Path $FilePath)) {
+        return $false
+    }
+
+    try {
+        $content = Get-Content -Path $FilePath -Raw
+
+        return (
+            $content -match '(?m)^TodayStatus=Completed\s*$' -and
+            $content -match "(?m)^DataDate=$([regex]::Escape($Today))\s*$"
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
+
+$todayString = (Get-Date -Format "yyyy-MM-dd")
+$githubFile = Join-Path $root "github-data.txt"
+$leetcodeFile = Join-Path $root "leetcode-data.txt"
+$linkedinFile = Join-Path $root "linkedin-data.txt"
+
+# Once all three daily tasks are complete, do not make any more web requests
+# or launch Playwright until a new calendar day starts after midnight.
+if (
+    (Test-TaskCompletedToday $githubFile $todayString) -and
+    (Test-TaskCompletedToday $leetcodeFile $todayString) -and
+    (Test-TaskCompletedToday $linkedinFile $todayString)
+) {
+    Log "All three tasks are complete for $todayString - refresh skipped until after midnight"
+    exit 0
 }
 
 
@@ -348,6 +402,12 @@ else {
 Log "======================================"
 Log "AUTO REFRESH COMPLETED"
 Log "======================================"
+
+}
+finally {
+    $refreshMutex.ReleaseMutex()
+    $refreshMutex.Dispose()
+}
 
 exit 0
 
